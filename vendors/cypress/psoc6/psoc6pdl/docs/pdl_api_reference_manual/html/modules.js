@@ -17,6 +17,7 @@ var modules =
     [ "LVD          (Low-Voltage-Detect)", "group__group__lvd.html", "group__group__lvd" ],
     [ "MCWDT        (Multi-Counter Watchdog)", "group__group__mcwdt.html", "group__group__mcwdt" ],
     [ "PDM_PCM      (PDM-PCM Converter)", "group__group__pdm__pcm.html", "group__group__pdm__pcm" ],
+    [ "PRA          (PRA)", "group__group__pra.html", "group__group__pra" ],
     [ "Profile      (Energy Profiler)", "group__group__energy__profiler.html", "group__group__energy__profiler" ],
     [ "Prot         (Protection Unit)", "group__group__prot.html", "group__group__prot" ],
     [ "RTC          (Real-Time Clock)", "group__group__rtc.html", "group__group__rtc" ],

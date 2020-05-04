@@ -95,6 +95,11 @@
     <ConfigInclude value="cy_gpio.h" include="true" />
     <ConfigInclude value="cy_sysclk.h" include="true" />
     <ConfigDefine name="CY_CFG_SYSCLK_WCO_ENABLED" value="1" public="false" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_WCO_IN_PRT" value="GPIO_PRT`${gpio_in_port}`" public="false" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_WCO_IN_PIN" value="`${gpio_in_pin}`U" public="false" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_WCO_OUT_PRT" value="GPIO_PRT`${gpio_out_port}`" public="false" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_WCO_OUT_PIN" value="`${gpio_out_pin}`U" public="false" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_WCO_BYPASS" value="`${clockPort}`" public="false" include="true" />
     <ConfigStruct name="`${INST_NAME . &quot;_wcoCsv&quot;}`" type="cy_stc_wco_csv_config_t" const="true" public="true" include="`${WCOCSV_PRESENT}`" >
       <Member name="SupervisorClock" value="`${clockSupervisor}`" />
       <Member name="enableLossDetection" value="`${clockLostDetection}`" />

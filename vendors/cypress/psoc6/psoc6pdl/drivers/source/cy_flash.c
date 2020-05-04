@@ -1,6 +1,6 @@
 /***************************************************************************//**
 * \file cy_flash.c
-* \version 3.30.4
+* \version 3.40
 *
 * \brief
 * Provides the public functions for the API for the PSoC 6 Flash Driver.
@@ -30,6 +30,9 @@
 #include "cy_ipc_pipe.h"
 #include "cy_device.h"
 #include "cy_syslib.h"
+#if defined(CY_DEVICE_SECURE)
+    #include "cy_pra.h"
+#endif /* defined(CY_DEVICE_SECURE) */
 
 
 /***************************************
@@ -173,7 +176,9 @@ typedef cy_en_flashdrv_status_t (*Cy_Flash_Proxy)(cy_stc_flash_context_t *contex
     /* Semaphore check timeout (in tries) */
     #define CY_FLASH_SEMA_WAIT_MAX_TRIES               (150000UL)
 
-    static void Cy_Flash_RAMDelay(uint32_t microseconds);
+    #if !defined(CY_DEVICE_SECURE)
+        static void Cy_Flash_RAMDelay(uint32_t microseconds);
+    #endif /* !defined(CY_DEVICE_SECURE) */
 
     #if (CY_CPU_CORTEX_M0P)
         #define IS_CY_PIPE_FREE(...)       (!Cy_IPC_Drv_IsLockAcquired(Cy_IPC_Drv_GetIpcBaseAddress(CY_IPC_CHAN_CYPIPE_EP1)))
@@ -184,7 +189,7 @@ typedef cy_en_flashdrv_status_t (*Cy_Flash_Proxy)(cy_stc_flash_context_t *contex
     #endif
 
     static void Cy_Flash_NotifyHandler(uint32_t * msgPtr);
-    
+
     static cy_stc_flash_notify_t * ipcWaitMessage;
 
 #else
@@ -194,7 +199,7 @@ typedef cy_en_flashdrv_status_t (*Cy_Flash_Proxy)(cy_stc_flash_context_t *contex
     #define CY_FLASH_START_PROGRAM_DELAY               (CY_FLASH_NO_DELAY)
     /** Delay time for Start Erase function in uS with corrective time */
     #define CY_FLASH_START_ERASE_DELAY                 (CY_FLASH_NO_DELAY)
-    
+
 #endif /* !defined(CY_FLASH_RWW_DRV_SUPPORT_DISABLED) */
 /** \endcond */
 
@@ -216,24 +221,24 @@ static volatile cy_stc_flash_context_t flashContext;
     * Initiates all needed prerequisites to support flash erase/write.
     * Should be called from each core. Defines the address of the message structure.
     *
-    * Requires a call to Cy_IPC_Sema_Init(), Cy_IPC_Pipe_Config() and 
+    * Requires a call to Cy_IPC_Sema_Init(), Cy_IPC_Pipe_Config() and
     * Cy_IPC_Pipe_Init() functions before use.
     *
-    * This function is called in the Cy_Flash_Init() function - see the 
+    * This function is called in the Cy_Flash_Init() function - see the
     * \ref Cy_Flash_Init usage considerations.
     *
     *******************************************************************************/
     void Cy_Flash_InitExt(cy_stc_flash_notify_t *ipcWaitMessageAddr)
     {
         ipcWaitMessage = ipcWaitMessageAddr;
-       
+
         if(ipcWaitMessage != NULL)
         {
             ipcWaitMessage->clientID = CY_FLASH_IPC_CLIENT_ID;
             ipcWaitMessage->pktType = CY_FLASH_ENTER_WAIT_LOOP;
-            ipcWaitMessage->intrRelMask = 0U;            
-        }                    
-            
+            ipcWaitMessage->intrRelMask = 0U;
+        }
+
         if (cy_device->flashRwwRequired != 0U)
         {
             #if (CY_CPU_CORTEX_M4)
@@ -254,8 +259,8 @@ static volatile cy_stc_flash_context_t flashContext;
                 }
         }
     }
-    
-    
+
+
     /*******************************************************************************
     * Function Name: Cy_Flash_NotifyHandler
     ****************************************************************************//**
@@ -311,22 +316,22 @@ static volatile cy_stc_flash_context_t flashContext;
 * Initiates all needed prerequisites to support flash erase/write.
 * Should be called from each core.
 *
-* Requires a call to Cy_IPC_Sema_Init(), Cy_IPC_Pipe_Config() and 
+* Requires a call to Cy_IPC_Sema_Init(), Cy_IPC_Pipe_Config() and
 * Cy_IPC_Pipe_Init() functions before use.
 *
 * This function is called in the SystemInit() function, for proper flash write
 * and erase operations. If the default startup file is not used, or the function
-* SystemInit() is not called in your project, ensure to perform the following steps 
+* SystemInit() is not called in your project, ensure to perform the following steps
 * before any flash or EmEEPROM write/erase operations:
 * \snippet flash/snippet/main.c Flash Initialization
 *
 *******************************************************************************/
 void Cy_Flash_Init(void)
 {
-    #if !defined(CY_FLASH_RWW_DRV_SUPPORT_DISABLED)    
+    #if !defined(CY_FLASH_RWW_DRV_SUPPORT_DISABLED)
         CY_SECTION(".cy_sharedmem")
         CY_ALIGN(4) static cy_stc_flash_notify_t ipcWaitMessageStc;
-        
+
         Cy_Flash_InitExt(&ipcWaitMessageStc);
     #endif /* !defined(CY_FLASH_RWW_DRV_SUPPORT_DISABLED) */
 }
@@ -364,7 +369,7 @@ static cy_en_flashdrv_status_t Cy_Flash_SendCmd(uint32_t mode, uint32_t microsec
 #if !defined(CY_FLASH_RWW_DRV_SUPPORT_DISABLED)
     uint32_t intr;
     uint32_t semaTryCount = 0uL;
-    
+
     if (cy_device->flashRwwRequired != 0U)
     {
         /* Check for active core is CM0+, or CM4 on single core device */
@@ -372,13 +377,13 @@ static cy_en_flashdrv_status_t Cy_Flash_SendCmd(uint32_t mode, uint32_t microsec
         bool isPeerCoreEnabled = (CY_SYS_CM4_STATUS_ENABLED == Cy_SysGetCM4Status());
     #else
         bool isPeerCoreEnabled = false;
-        
+
         if (SFLASH_SINGLE_CORE == 0U)
         {
             isPeerCoreEnabled = true;
         }
     #endif
-        
+
         if (!isPeerCoreEnabled)
         {
             result = CY_FLASH_DRV_SUCCESS;
@@ -444,7 +449,7 @@ static cy_en_flashdrv_status_t Cy_Flash_SendCmd(uint32_t mode, uint32_t microsec
                 /* SysClk measurement counter is busy */
                 result = CY_FLASH_DRV_IPC_BUSY;
             }
-            
+
             if (isPeerCoreEnabled)
             {
                 while (CY_IPC_SEMA_SUCCESS != Cy_IPC_Sema_Clear(CY_FLASH_WAIT_SEMA, true))
@@ -511,8 +516,14 @@ CY_RAMFUNC_END
     #if !defined (__ICCARM__)
         CY_NOINLINE
     #endif
-    static void Cy_Flash_RAMDelay(uint32_t microseconds)
+    #if !defined(CY_DEVICE_SECURE)
+        static
+    #endif
+    void Cy_Flash_RAMDelay(uint32_t microseconds)
     {
+    #if CY_CPU_CORTEX_M4 && defined(CY_DEVICE_SECURE)
+        CY_PRA_FUNCTION_CALL_VOID_PARAM(CY_PRA_MSG_TYPE_SECURE_ONLY, CY_PRA_INDX_FLASH_RAM_DELAY, microseconds);
+    #else
         uint32_t ticks = (microseconds & 0xFFFFUL) * CY_FLASH_TICKS_FOR_1US;
         if (ticks != CY_FLASH_NO_DELAY)
         {
@@ -521,7 +532,12 @@ CY_RAMFUNC_END
             {
                 /* Wait until the IPC structure is released by another process */
             }
-            
+
+            #if CY_CPU_CORTEX_M0P && defined(CY_DEVICE_SECURE)
+                /* Restrict access to SRSS_TST_DDFT_FAST_CTL_REG and SRSS_TST_DDFT_SLOW_CTL_REG */
+                Cy_PRA_CloseSrssMain2();
+            #endif /* CY_CPU_CORTEX_M0P && defined(CY_DEVICE_SECURE) */
+
             SRSS_TST_DDFT_FAST_CTL_REG  = SRSS_TST_DDFT_FAST_CTL_MASK;
             SRSS_TST_DDFT_SLOW_CTL_REG  = SRSS_TST_DDFT_SLOW_CTL_MASK;
 
@@ -536,12 +552,18 @@ CY_RAMFUNC_END
 
             /* Release the IPC */
             REG_IPC_STRUCT_RELEASE(CY_IPC_STRUCT_PTR(CY_IPC_CHAN_DDFT)) = 0U;
-            
+
             while (0UL == _FLD2VAL(SRSS_CLK_CAL_CNT1_CAL_COUNTER_DONE, SRSS_CLK_CAL_CNT1))
             {
                 /* Wait until the counter stops counting */
             }
+
+            #if CY_CPU_CORTEX_M0P && defined(CY_DEVICE_SECURE)
+                /* Restore access to SRSS_TST_DDFT_FAST_CTL_REG and SRSS_TST_DDFT_SLOW_CTL_REG */
+                Cy_PRA_OpenSrssMain2();
+            #endif /* CY_CPU_CORTEX_M0P && defined(CY_DEVICE_SECURE) */
         }
+    #endif /* CY_CPU_CORTEX_M4 && defined(CY_DEVICE_SECURE) */
     }
     CY_RAMFUNC_END
 
@@ -557,7 +579,7 @@ CY_RAMFUNC_END
         #define CY_FLASH_FINAL_STAGE_DELAY_TICKS     (1000UL)
         #define CY_FLASH_FINAL_STAGE_DELAY           (130UL + CY_FLASH_DELAY_CORRECTIVE(CY_FLASH_FINAL_STAGE_DELAY_TICKS))
 
-        
+
         /*******************************************************************************
         * Function Name: Cy_Flash_ResumeIrqHandler
         ****************************************************************************//**
@@ -617,7 +639,7 @@ CY_RAMFUNC_END
 * detect circuits should be configured to generate an interrupt instead of a
 * reset. Otherwise, portions of flash may undergo unexpected changes.
 *
-* \param rowAddr Address of the flash row number. 
+* \param rowAddr Address of the flash row number.
 * The Read-while-Write violation occurs when the flash read operation is
 * initiated in the same flash sector where the flash write operation is
 * performing. Refer to the device datasheet for the details.
@@ -668,12 +690,12 @@ cy_en_flashdrv_status_t Cy_Flash_EraseRow(uint32_t rowAddr)
 * XRES pin, a software reset, and watchdog reset sources. Also, the low-voltage
 * detect circuits should be configured to generate an interrupt instead of a reset.
 * Otherwise, portions of flash may undergo unexpected changes.
-* \note To avoid situation of reading data from cache memory - before 
-* reading data from previously programmed/erased flash rows, the user must 
+* \note To avoid situation of reading data from cache memory - before
+* reading data from previously programmed/erased flash rows, the user must
 * clear the flash cache with the Cy_SysLib_ClearFlashCacheAndBuffer()
 * function.
 *
-* \param rowAddr Address of the flash row number. 
+* \param rowAddr Address of the flash row number.
 * The Read-while-Write violation occurs when the flash read operation is
 * initiated in the same flash sector where the flash erase operation is
 * performing. Refer to the device datasheet for the details.
@@ -697,7 +719,7 @@ cy_en_flashdrv_status_t Cy_Flash_StartEraseRow(uint32_t rowAddr)
         {
             flashContext.opcode |= CY_FLASH_BLOCKING_MODE;
         }
-        
+
         flashContext.arg1 = rowAddr;
         flashContext.arg2 = 0UL;
         flashContext.arg3 = 0UL;
@@ -731,7 +753,7 @@ cy_en_flashdrv_status_t Cy_Flash_StartEraseRow(uint32_t rowAddr)
 * detect circuits should be configured to generate an interrupt instead of a
 * reset. Otherwise, portions of flash may undergo unexpected changes.
 *
-* \param sectorAddr Address of the flash row number. 
+* \param sectorAddr Address of the flash row number.
 * The Read-while-Write violation occurs when the flash read operation is
 * initiated in the same flash sector where the flash write operation is
 * performing. Refer to the device datasheet for the details.
@@ -786,7 +808,7 @@ cy_en_flashdrv_status_t Cy_Flash_EraseSector(uint32_t sectorAddr)
 * user must clear the flash cache with the Cy_SysLib_ClearFlashCacheAndBuffer()
 * function.
 *
-* \param sectorAddr Address of the flash row number. 
+* \param sectorAddr Address of the flash row number.
 * The Read-while-Write violation occurs when the flash read operation is
 * initiated in the same flash sector where the flash erase operation is
 * performing. Refer to the device datasheet for the details.
@@ -810,7 +832,7 @@ cy_en_flashdrv_status_t Cy_Flash_StartEraseSector(uint32_t sectorAddr)
         {
             flashContext.opcode |= CY_FLASH_BLOCKING_MODE;
         }
-        
+
         flashContext.arg1 = sectorAddr;
         flashContext.arg2 = 0UL;
         flashContext.arg3 = 0UL;
@@ -844,7 +866,7 @@ cy_en_flashdrv_status_t Cy_Flash_StartEraseSector(uint32_t sectorAddr)
 * detect circuits should be configured to generate an interrupt instead of a
 * reset. Otherwise, portions of flash may undergo unexpected changes.
 *
-* \param subSectorAddr Address of the flash row number. 
+* \param subSectorAddr Address of the flash row number.
 * The Read-while-Write violation occurs when the flash read operation is
 * initiated in the same flash sector where the flash write operation is
 * performing. Refer to the device datasheet for the details.
@@ -899,7 +921,7 @@ cy_en_flashdrv_status_t Cy_Flash_EraseSubsector(uint32_t subSectorAddr)
 * user must clear the flash cache with the Cy_SysLib_ClearFlashCacheAndBuffer()
 * function.
 *
-* \param subSectorAddr Address of the flash row number. 
+* \param subSectorAddr Address of the flash row number.
 * The Read-while-Write violation occurs when the flash read operation is
 * initiated in the same flash sector where the flash erase operation is
 * performing. Refer to the device datasheet for the details.
@@ -923,7 +945,7 @@ cy_en_flashdrv_status_t Cy_Flash_StartEraseSubsector(uint32_t subSectorAddr)
         {
             flashContext.opcode |= CY_FLASH_BLOCKING_MODE;
         }
-        
+
         flashContext.arg1 = subSectorAddr;
         flashContext.arg2 = 0UL;
         flashContext.arg3 = 0UL;
@@ -964,7 +986,7 @@ cy_en_flashdrv_status_t Cy_Flash_StartEraseSubsector(uint32_t subSectorAddr)
 * user must clear the flash cache with the Cy_SysLib_ClearFlashCacheAndBuffer()
 * function.
 *
-* \param rowAddr Address of the flash row number. 
+* \param rowAddr Address of the flash row number.
 * The Read-while-Write violation occurs when the flash read operation is
 * initiated in the same flash sector where the flash write operation is
 * performing. Refer to the device datasheet for the details.
@@ -1088,7 +1110,7 @@ cy_en_flashdrv_status_t Cy_Flash_WriteRow(uint32_t rowAddr, const uint32_t* data
 * user must clear the flash cache with the Cy_SysLib_ClearFlashCacheAndBuffer()
 * function.
 *
-* \param rowAddr Address of the flash row number. 
+* \param rowAddr Address of the flash row number.
 * The Read-while-Write violation occurs when the flash read operation is
 * initiated in the same flash sector where the flash write operation is
 * performing. Refer to the device datasheet for the details.
@@ -1168,7 +1190,7 @@ cy_en_flashdrv_status_t Cy_Flash_IsOperationComplete(void)
 * user must clear the flash cache with the Cy_SysLib_ClearFlashCacheAndBuffer()
 * function.
 *
-* \param rowAddr The address of the flash row number. 
+* \param rowAddr The address of the flash row number.
 * The Read-while-Write violation occurs when the Flash Write operation is
 * performing. Refer to the device datasheet for the details.
 * The address must match the row start address.
@@ -1192,12 +1214,12 @@ cy_en_flashdrv_status_t Cy_Flash_StartProgram(uint32_t rowAddr, const uint32_t* 
 
         /* Prepares arguments to be passed to SROM API */
         flashContext.opcode = CY_FLASH_OPCODE_PROGRAM_ROW;
-        
+
         if (SFLASH_SINGLE_CORE != 0U)
         {
             flashContext.opcode |= CY_FLASH_BLOCKING_MODE;
         }
-        
+
         flashContext.arg1   = CY_FLASH_DATA_LOC_SRAM;
         flashContext.arg2   = rowAddr;
         flashContext.arg3   = (uint32_t)data;
@@ -1522,11 +1544,17 @@ static cy_en_flashdrv_status_t Cy_Flash_OperationStatus(void)
         result = Cy_Flash_ProcessOpcode(flashContext.opcode);
 
         /* Clear pre-fetch cache after flash operation */
-        FLASHC_FLASH_CMD = FLASHC_FLASH_CMD_INV_Msk;
-
-        while (FLASHC_FLASH_CMD != 0U)
-        {
-        }
+        #if CY_CPU_CORTEX_M4 && defined(CY_DEVICE_SECURE)
+            CY_PRA_REG32_SET(CY_PRA_INDX_FLASHC_FLASH_CMD, FLASHC_FLASH_CMD_INV_Msk);
+            while (CY_PRA_REG32_GET(CY_PRA_INDX_FLASHC_FLASH_CMD) != 0U)
+            {
+            }
+        #else
+            FLASHC_FLASH_CMD = FLASHC_FLASH_CMD_INV_Msk;
+            while (FLASHC_FLASH_CMD != 0U)
+            {
+            }
+        #endif /* CY_CPU_CORTEX_M4 && defined(CY_DEVICE_SECURE) */
     }
 
     return (result);

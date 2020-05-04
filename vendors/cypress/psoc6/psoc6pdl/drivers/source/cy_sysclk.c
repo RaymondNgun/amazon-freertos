@@ -1,6 +1,6 @@
 /***************************************************************************//**
 * \file cy_sysclk.c
-* \version 1.60
+* \version 2.10
 *
 * Provides an API implementation of the sysclk driver.
 *
@@ -58,10 +58,15 @@ static uint32_t extFreq = 0UL; /* Internal storage for external clock frequency 
 *******************************************************************************/
 void Cy_SysClk_ExtClkSetFrequency(uint32_t freq)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    (void)freq;
+	(void)extFreq;
+#else
     if (freq <= CY_SYSCLK_EXTCLK_MAX_FREQ)
     {
         extFreq = freq;
     }
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 
 
@@ -80,7 +85,12 @@ void Cy_SysClk_ExtClkSetFrequency(uint32_t freq)
 *******************************************************************************/
 uint32_t Cy_SysClk_ExtClkGetFrequency(void)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+	return (CY_PRA_STATUS_ACCESS_DENIED);
+#else
     return (extFreq);
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
+
 }
 /** \} group_sysclk_ext_funcs */
 
@@ -96,23 +106,25 @@ uint32_t Cy_SysClk_ExtClkGetFrequency(void)
                                  SRSS_CLK_TRIM_ECO_CTL_RTRIM_Msk  | \
                                  SRSS_CLK_TRIM_ECO_CTL_GTRIM_Msk)
 
-
-/*******************************************************************************
+/** \cond *********************************************************************
 * Function Name: cy_sqrt
 * Calculates square root.
+* The input is 32-bit wide.
+* The result is 16-bit wide.
 *******************************************************************************/
-static uint32_t cy_sqrt(uint64_t x);
-static uint32_t cy_sqrt(uint64_t x)
+#if !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+static uint32_t cy_sqrt(uint32_t x);
+static uint32_t cy_sqrt(uint32_t x)
 {
     uint32_t i;
     uint32_t res = 0UL;
-    uint32_t add = 0x80000000UL;
+    uint32_t add = 0x8000UL;
 
-    for(i = 0UL; i < 32UL; i++)
+    for(i = 0UL; i < 16UL; i++)
     {
         uint32_t tmp = res | add;
 
-        if (x >= ((uint64_t)tmp * tmp))
+        if (x >= (tmp * tmp))
         {
             res = tmp;
         }
@@ -122,9 +134,20 @@ static uint32_t cy_sqrt(uint64_t x)
 
     return (res);
 }
-
+#endif /* !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
 static uint32_t ecoFreq = 0UL; /* Internal storage for ECO frequency user setting */
+
+#define CY_SYSCLK_ECO_FREQ_MIN (16000000UL) /* 16 MHz */
+#define CY_SYSCLK_ECO_FREQ_MAX (35000000UL) /* 35 MHz */
+#define CY_SYSCLK_ECO_CSM_MAX  (100UL)      /* 100 pF */
+#define CY_SYSCLK_ECO_ESR_MAX  (1000UL)     /* 1000 Ohm */
+#define CY_SYSCLK_ECO_DRV_MAX  (2000UL)     /* 2 mW */
+
+#define CY_SYSCLK_ECO_IS_FREQ_VALID(freq) ((CY_SYSCLK_ECO_FREQ_MIN <= (freq)) && ((freq) <= CY_SYSCLK_ECO_FREQ_MAX))
+#define CY_SYSCLK_ECO_IS_CSM_VALID(csm)   ((0UL < (csm)) && ((csm) <= CY_SYSCLK_ECO_CSM_MAX))
+#define CY_SYSCLK_ECO_IS_ESR_VALID(esr)   ((0UL < (esr)) && ((esr) <= CY_SYSCLK_ECO_ESR_MAX))
+#define CY_SYSCLK_ECO_IS_DRV_VALID(drv)   ((0UL < (drv)) && ((drv) <= CY_SYSCLK_ECO_DRV_MAX))
 /** \endcond */
 
 /**
@@ -139,12 +162,19 @@ static uint32_t ecoFreq = 0UL; /* Internal storage for ECO frequency user settin
 * characteristics. This function should be called only when the ECO is disabled.
 *
 * \param freq Operating frequency of the crystal in Hz.
+* Valid range: 16000000...35000000 (16..35 MHz).
+* 
+* \param cSum The summary capacitance of
+* C0 (the crystal itself shunt capacitance) and
+* Cload (the parallel load capacitance), in pF.
+* So cSum = C0 + Cload.
+* Valid range: 1...100.
 *
-* \param cLoad Crystal load capacitance in pF.
-*
-* \param esr Effective series resistance of the crystal in ohms.
+* \param esr Effective series resistance of the crystal in Ohms.
+* Valid range: 1...1000.
 *
 * \param driveLevel Crystal drive level in uW.
+* Valid range: 1...2000.
 *
 * \return Error / status code: \n
 * CY_SYSCLK_SUCCESS - ECO configuration completed successfully \n
@@ -152,106 +182,89 @@ static uint32_t ecoFreq = 0UL; /* Internal storage for ECO frequency user settin
 * CY_SYSCLK_INVALID_STATE - ECO already enabled
 *
 * \note
-* The following calculations are implemented, generally in floating point:
+* The following calculations are implemented in the 32-bit integer math:
 *
 * \verbatim
-*   freqMHz = freq / 1000000
-*   max amplitude Vpp = 1000 * sqrt(drivelevel / 2 / esr) / 3.14 / freqMHz / cLoad
-*   gm_min mA/V = 5 * 4 * 3.14 * 3.14 * freqMhz^2 * cLoad^2 * 4 * esr / 1000000000
-*   Number of amplifier sections = INT(gm_min / 4.5)
+*   freqKhz = freq / 1000
+*   maxAmpl = sqrt(drivelevel / 2 / esr) / 3.14 / freqKhz / cSum
+*   ampSect = INT(5 * 4 * 3.14^2 * freqKhz^2 * cSum^2 * 4 * esr / 1000000000 / 1000000 / 9)
 *
-*   As a result of the above calculations, max amplitude must be >= 0.5, and the
+*   As a result of the above calculations, max amplitude must be >= 0.65V, and the
 *   number of amplifier sections must be <= 3, otherwise this function returns with
 *   a parameter error.
 *
-*   atrim = if (max amplitude < 0.5) then error
-*           else 2 * the following:
-*                    max amplitude < 0.6: 0
-*                    max amplitude < 0.7: 1
-*                    max amplitude < 0.8: 2
-*                    max amplitude < 0.9: 3
-*                    max amplitude < 1.15: 5
-*                    max amplitude < 1.275: 6
-*                    max amplitude >= 1.275: 7
-*   wdtrim = if (max amplitude < 0.5) then error
-*            else 2 * the following:
-*                     max amplitude < 1.2: INT(5 * max amplitude) - 2
-*                     max amplitude >= 1.2: 3
-*   gtrim = if (number of amplifier sections > 3) then error
-*           else the following:
-*                number of amplifier sections > 1: number of amplifier sections
-*                number of amplifier sections = 1: 0
-*                number of amplifier sections < 1: 1
-*   rtrim = if (gtrim = error) then error
-*           else the following:
-*                freqMHz > 26.8: 0
-*                freqMHz > 23.33: 1
-*                freqMHz > 16.5: 2
-*                freqMHz <= 16.5: 3
-*   ftrim = if (atrim = error) then error
-*           else INT(atrim / 2)
+*   atrim = 15
+*   agc_en = 1
+*   wdtrim = 7
+*   gtrim = ampSect > 1 ? ampSect : ampSect == 1 ? 0 : 1
+*   rtrim = 0
+*   ftrim = 3
 * \endverbatim
-*
 *
 * \funcusage
 * \snippet sysclk/snippet/main.c snippet_Cy_SysClk_EcoConfigure
 *
 *******************************************************************************/
-cy_en_sysclk_status_t Cy_SysClk_EcoConfigure(uint32_t freq, uint32_t cLoad, uint32_t esr, uint32_t driveLevel)
+cy_en_sysclk_status_t Cy_SysClk_EcoConfigure(uint32_t freq, uint32_t cSum, uint32_t esr, uint32_t driveLevel)
 {
-    /* error if ECO is not disabled - any of the 3 enable bits are set */
-    cy_en_sysclk_status_t retVal = CY_SYSCLK_INVALID_STATE;
-    if (0UL == (SRSS_CLK_ECO_CONFIG_ECO_EN_Msk & SRSS_CLK_ECO_CONFIG))
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+	cy_stc_pra_clk_eco_configure_t eco_config;
+	eco_config.freq = freq;
+	eco_config.csum = cSum;
+	eco_config.esr = esr;
+	eco_config.drive_level = driveLevel;
+    return (cy_en_sysclk_status_t)CY_PRA_FUNCTION_CALL_RETURN_PARAM(CY_PRA_MSG_TYPE_FUNC_POLICY, CY_PRA_CLK_FUNC_ECO_CONFIGURE, &eco_config); 
+#else
+    cy_en_sysclk_status_t retVal = CY_SYSCLK_BAD_PARAM;
+
+    if (0UL != (SRSS_CLK_ECO_CONFIG_ECO_EN_Msk & SRSS_CLK_ECO_CONFIG))
     {
-        /* calculate intermediate values */
-        uint32_t maxAmplitude = (uint32_t)CY_SYSLIB_DIV_ROUND((1000000000000ULL * /* 1000000.0f * 1000.0f * 10^3 */
-                                  cy_sqrt(CY_SYSLIB_DIV_ROUND(500000ULL * (uint64_t)driveLevel, (uint64_t)esr))),
-                                                              (3141ULL * (uint64_t)freq * (uint64_t)cLoad)); /* The result is scaled by 10^3 */
+        retVal = CY_SYSCLK_INVALID_STATE;
+    }
+    else if ((CY_SYSCLK_ECO_IS_FREQ_VALID(freq)) &&
+             (CY_SYSCLK_ECO_IS_CSM_VALID(cSum)) &&
+             (CY_SYSCLK_ECO_IS_ESR_VALID(esr)) &&
+             (CY_SYSCLK_ECO_IS_DRV_VALID(driveLevel)))
+    {
+        /* Calculate intermediate values */
+        uint32_t freqKhz = CY_SYSLIB_DIV_ROUND(freq, 1000UL);
 
-        uint32_t nAmpSections = (uint32_t)CY_SYSLIB_DIV_ROUND((uint64_t)freq *
-                                                    (uint64_t)freq *
-                                                    (uint64_t)cLoad *
-                                                    (uint64_t)cLoad, 5704868154158ULL); /* (4.5 * (10^15) / 788.8), the result is scaled by 10^6 */
+        uint32_t maxAmpl = CY_SYSLIB_DIV_ROUND((159155UL * /* 5 * 100000 / PI */
+                   cy_sqrt(CY_SYSLIB_DIV_ROUND(2000000UL * driveLevel, esr))), /* Scaled by 2 */
+                                               (freqKhz * cSum)); /* The result is scaled by 10^3 */
 
-        if ((maxAmplitude < 500UL) && (nAmpSections > 3000000UL))
+        /* 10^9 / (5 * 4 * 4 * PI^2) = 1266514,7955292221430484932901216.. -> 126651, scaled by 10 */
+        uint32_t ampSect = (CY_SYSLIB_DIV_ROUND(cSum * cSum *
+                            CY_SYSLIB_DIV_ROUND(freqKhz * freqKhz, 126651UL), 100UL) * esr)/ 900000UL;
+
+        if ((maxAmpl >= 650UL) && (ampSect <= 3UL))
         {
-            /* Error if input parameters cause erroneous intermediate values */
-            retVal = CY_SYSCLK_BAD_PARAM;
-        }
-        else
-        {
-            uint32_t atrim = (maxAmplitude < 600UL) ? 0UL :
-                              ((maxAmplitude < 700UL) ? 2UL :
-                               ((maxAmplitude < 800UL) ? 4UL :
-                                ((maxAmplitude < 900UL) ? 6UL :
-                                 ((maxAmplitude < 1150UL) ? 10UL :
-                                  ((maxAmplitude < 1275UL) ? 12UL : 14UL)))));
-
-            uint32_t wdtrim = (maxAmplitude < 1200UL) ? ((maxAmplitude / 100UL) - 4UL) : 6UL;
-
-            uint32_t gtrim = ((nAmpSections > 1000000UL) ? CY_SYSLIB_DIV_ROUND(nAmpSections, 1000000UL) :
-                             ((nAmpSections == 1000000UL) ? 0UL : 1UL));
-
-            uint32_t rtrim = ((freq > 26800000UL) ? 0UL :
-                              ((freq > 23330000UL) ? 1UL :
-                               ((freq > 16500000UL) ? 2UL : 3UL)));
+            uint32_t gtrim = (ampSect > 1UL) ? ampSect :
+                            ((ampSect == 1UL) ? 0UL : 1UL);
 
             /* Update all fields of trim control register with one write, without changing the ITRIM field */
-            uint32_t reg = _VAL2FLD(SRSS_CLK_TRIM_ECO_CTL_WDTRIM, wdtrim)    |
-                           _VAL2FLD(SRSS_CLK_TRIM_ECO_CTL_ATRIM, atrim)      |
-                           _VAL2FLD(SRSS_CLK_TRIM_ECO_CTL_FTRIM, atrim / 2UL)|
-                           _VAL2FLD(SRSS_CLK_TRIM_ECO_CTL_RTRIM, rtrim)      |
+            uint32_t reg = _VAL2FLD(SRSS_CLK_TRIM_ECO_CTL_WDTRIM, 7UL) |
+                           _VAL2FLD(SRSS_CLK_TRIM_ECO_CTL_ATRIM, 15UL) |
+                           _VAL2FLD(SRSS_CLK_TRIM_ECO_CTL_FTRIM, 3UL)  |
+                           _VAL2FLD(SRSS_CLK_TRIM_ECO_CTL_RTRIM, 0UL)  |
                            _VAL2FLD(SRSS_CLK_TRIM_ECO_CTL_GTRIM, gtrim);
                   
             CY_REG32_CLR_SET(SRSS_CLK_TRIM_ECO_CTL, CY_SYSCLK_TRIM_ECO, reg);
 
-            ecoFreq = freq; /* Store ECO frequency */
+            SRSS_CLK_ECO_CONFIG |= SRSS_CLK_ECO_CONFIG_AGC_EN_Msk;
+
+            ecoFreq = freq; /* Store the ECO frequency */
 
             retVal = CY_SYSCLK_SUCCESS;
-        } /* if valid parameters */
-    } /* if ECO not enabled */
+        }
+    }
+    else
+    {
+        /* Return CY_SYSCLK_BAD_PARAM */
+    }
 
     return (retVal);
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 
 /*******************************************************************************
@@ -279,6 +292,9 @@ cy_en_sysclk_status_t Cy_SysClk_EcoConfigure(uint32_t freq, uint32_t cLoad, uint
 *******************************************************************************/
 cy_en_sysclk_status_t Cy_SysClk_EcoEnable(uint32_t timeoutus)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    return (cy_en_sysclk_status_t)CY_PRA_FUNCTION_CALL_RETURN_PARAM(CY_PRA_MSG_TYPE_FUNC_POLICY, CY_PRA_CLK_FUNC_ECO_ENABLE, timeoutus); 
+#else
     cy_en_sysclk_status_t retVal = CY_SYSCLK_INVALID_STATE;
     bool zeroTimeout = (0UL == timeoutus);
 
@@ -298,6 +314,7 @@ cy_en_sysclk_status_t Cy_SysClk_EcoEnable(uint32_t timeoutus)
     }
 
     return (retVal);
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 
 
@@ -366,6 +383,12 @@ uint32_t Cy_SysClk_EcoGetFrequency(void)
 *******************************************************************************/
 cy_en_sysclk_status_t Cy_SysClk_ClkPathSetSource(uint32_t clkPath, cy_en_clkpath_in_sources_t source)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+	cy_stc_pra_clkpathsetsource_t clkpath_set_source;
+	clkpath_set_source.clk_path = clkPath;
+	clkpath_set_source.source   = source;
+    return (cy_en_sysclk_status_t)CY_PRA_FUNCTION_CALL_RETURN_PARAM(CY_PRA_MSG_TYPE_FUNC_POLICY, CY_PRA_CLK_FUNC_PATH_SET_SOURCE, &clkpath_set_source); 
+#else
     cy_en_sysclk_status_t retVal = CY_SYSCLK_BAD_PARAM;
     if ((clkPath < CY_SRSS_NUM_CLKPATH) &&
         ((source <= CY_SYSCLK_CLKPATH_IN_DSIMUX) ||
@@ -383,6 +406,7 @@ cy_en_sysclk_status_t Cy_SysClk_ClkPathSetSource(uint32_t clkPath, cy_en_clkpath
         retVal = CY_SYSCLK_SUCCESS;
     }
     return (retVal);
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 
 /*******************************************************************************
@@ -501,9 +525,9 @@ uint32_t Cy_SysClk_ClkPathGetFrequency(uint32_t clkPath)
     CY_ASSERT_L1(clkPath < CY_SRSS_NUM_CLKPATH);
     
     uint32_t freq = Cy_SysClk_ClkPathMuxGetFrequency(clkPath);
-    uint32_t fDiv = 0UL;    /* FLL/PLL multiplier/feedback divider */
-    uint32_t rDiv = 0UL;    /* FLL/PLL reference divider */
-    uint32_t oDiv = 0UL;    /* FLL/PLL output divider */
+    uint32_t fDiv = 1UL;    /* FLL/PLL multiplier/feedback divider */
+    uint32_t rDiv = 1UL;    /* FLL/PLL reference divider */
+    uint32_t oDiv = 1UL;    /* FLL/PLL output divider */
     bool  enabled = false;  /* FLL or PLL enable status; n/a for direct */
     
     if (clkPath == (uint32_t)CY_SYSCLK_CLKHF_IN_CLKPATH0) /* FLL? (always path 0) */
@@ -529,7 +553,8 @@ uint32_t Cy_SysClk_ClkPathGetFrequency(uint32_t clkPath)
         /* Do nothing with the path mux frequency */
     }
 
-    if (enabled) /* If FLL or PLL is enabled and not bypassed */
+    if (enabled && /* If FLL or PLL is enabled and not bypassed */
+        (0UL != rDiv) && (0UL != oDiv)) /* to avoid division by zero */
     {
         freq = (uint32_t)CY_SYSLIB_DIV_ROUND(((uint64_t)freq * (uint64_t)fDiv),
                                              ((uint64_t)rDiv * (uint64_t)oDiv));
@@ -774,6 +799,9 @@ cy_en_sysclk_status_t Cy_SysClk_FllConfigure(uint32_t inputFreq, uint32_t output
 *******************************************************************************/
 cy_en_sysclk_status_t Cy_SysClk_FllManualConfigure(const cy_stc_fll_manual_config_t *config)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    return (cy_en_sysclk_status_t)CY_PRA_FUNCTION_CALL_RETURN_PARAM(CY_PRA_MSG_TYPE_FUNC_POLICY, CY_PRA_CLK_FUNC_FLL_MANCONFIG, config); 
+#else
     cy_en_sysclk_status_t retVal = CY_SYSCLK_INVALID_STATE;
 
     /* Check for errors */
@@ -819,6 +847,7 @@ cy_en_sysclk_status_t Cy_SysClk_FllManualConfigure(const cy_stc_fll_manual_confi
     }
 
     return (retVal);
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 
 /*******************************************************************************
@@ -888,6 +917,9 @@ void Cy_SysClk_FllGetConfiguration(cy_stc_fll_manual_config_t *config)
 *******************************************************************************/
 cy_en_sysclk_status_t Cy_SysClk_FllEnable(uint32_t timeoutus)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    return (cy_en_sysclk_status_t)CY_PRA_FUNCTION_CALL_RETURN_PARAM(CY_PRA_MSG_TYPE_FUNC_POLICY, CY_PRA_CLK_FUNC_FLL_ENABLE, timeoutus); 
+#else
     bool zeroTimeout = (0UL == timeoutus);
 
     /* first set the CCO enable bit */
@@ -930,6 +962,7 @@ cy_en_sysclk_status_t Cy_SysClk_FllEnable(uint32_t timeoutus)
     }
 
     return ((zeroTimeout || (0UL != timeoutus)) ? CY_SYSCLK_SUCCESS : CY_SYSCLK_TIMEOUT);
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 /** \} group_sysclk_fll_funcs */
 
@@ -1134,6 +1167,12 @@ cy_en_sysclk_status_t Cy_SysClk_PllConfigure(uint32_t clkPath, const cy_stc_pll_
 *******************************************************************************/
 cy_en_sysclk_status_t Cy_SysClk_PllManualConfigure(uint32_t clkPath, const cy_stc_pll_manual_config_t *config)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+	cy_stc_pra_clk_pll_manconfigure_t pll_config;
+	pll_config.clkPath 	 = clkPath;
+	pll_config.config    = (cy_stc_pll_manual_config_t *)config;
+    return (cy_en_sysclk_status_t)CY_PRA_FUNCTION_CALL_RETURN_PARAM(CY_PRA_MSG_TYPE_FUNC_POLICY, CY_PRA_CLK_FUNC_PLL_MANCONFIG, &pll_config); 
+#else
     cy_en_sysclk_status_t retVal = CY_SYSCLK_SUCCESS;
 
     /* check for errors */
@@ -1170,6 +1209,7 @@ cy_en_sysclk_status_t Cy_SysClk_PllManualConfigure(uint32_t clkPath, const cy_st
     }
 
     return (retVal);
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 
 /*******************************************************************************
@@ -1242,6 +1282,10 @@ cy_en_sysclk_status_t Cy_SysClk_PllGetConfiguration(uint32_t clkPath, cy_stc_pll
 *******************************************************************************/
 cy_en_sysclk_status_t Cy_SysClk_PllEnable(uint32_t clkPath, uint32_t timeoutus)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    (void)timeoutus;
+    return (cy_en_sysclk_status_t)CY_PRA_FUNCTION_CALL_RETURN_PARAM(CY_PRA_MSG_TYPE_FUNC_POLICY, CY_PRA_CLK_FUNC_PLL_ENABLE, clkPath); 
+#else
     cy_en_sysclk_status_t retVal = CY_SYSCLK_BAD_PARAM;
     bool nonZeroTimeout = (timeoutus != 0ul);
     clkPath--; /* to correctly access PLL config and status registers structures */
@@ -1260,6 +1304,7 @@ cy_en_sysclk_status_t Cy_SysClk_PllEnable(uint32_t clkPath, uint32_t timeoutus)
         retVal = ((nonZeroTimeout && (timeoutus == 0ul)) ? CY_SYSCLK_TIMEOUT : CY_SYSCLK_SUCCESS);
     }
     return (retVal);
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 /** \} group_sysclk_pll_funcs */
 
@@ -1347,6 +1392,14 @@ static bool preventCounting = false;
 *******************************************************************************/
 cy_en_sysclk_status_t Cy_SysClk_StartClkMeasurementCounters(cy_en_meas_clks_t clock1, uint32_t count1, cy_en_meas_clks_t clock2)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    (void) clock1; 
+	(void) count1;
+	(void) clock2;
+	(void) clk1Count1;
+    (void) preventCounting;
+	return (cy_en_sysclk_status_t)CY_PRA_STATUS_ACCESS_DENIED;
+#else
     cy_en_sysclk_status_t retVal = CY_SYSCLK_BAD_PARAM;
 
     uint32_t clkOutputSlowVal = 0UL;
@@ -1474,6 +1527,7 @@ cy_en_sysclk_status_t Cy_SysClk_StartClkMeasurementCounters(cy_en_meas_clks_t cl
     }
 
     return (retVal);
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 
 /*******************************************************************************
@@ -1503,6 +1557,11 @@ cy_en_sysclk_status_t Cy_SysClk_StartClkMeasurementCounters(cy_en_meas_clks_t cl
 *******************************************************************************/
 uint32_t Cy_SysClk_ClkMeasurementCountersGetFreq(bool measuredClock, uint32_t refClkFreq)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    (void) measuredClock; 
+	(void) refClkFreq;
+	return CY_PRA_STATUS_ACCESS_DENIED;
+#else
     uint32_t retVal = 0UL;
     bool isMeasurementValid = false;
 
@@ -1543,6 +1602,7 @@ uint32_t Cy_SysClk_ClkMeasurementCountersGetFreq(bool measuredClock, uint32_t re
     }
     
     return (retVal);
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 /** \} group_sysclk_calclk_funcs */
 
@@ -1581,6 +1641,10 @@ uint32_t Cy_SysClk_ClkMeasurementCountersGetFreq(bool measuredClock, uint32_t re
 
 int32_t Cy_SysClk_IloTrim(uint32_t iloFreq)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    (void) iloFreq; 
+	return CY_PRA_STATUS_ACCESS_DENIED;
+#else
     uint32_t diff;
     bool sign = false;
 
@@ -1620,6 +1684,7 @@ int32_t Cy_SysClk_IloTrim(uint32_t iloFreq)
     }
     
     return (sign ? (int32_t)diff : (0L - (int32_t)diff));
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 
 /*******************************************************************************
@@ -1646,6 +1711,10 @@ int32_t Cy_SysClk_IloTrim(uint32_t iloFreq)
 
 int32_t Cy_SysClk_PiloTrim(uint32_t piloFreq)
 {
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    (void) piloFreq; 
+	return (int32_t)CY_PRA_STATUS_ACCESS_DENIED;
+#else
     uint32_t diff;
     bool sign = false;
 
@@ -1692,7 +1761,8 @@ int32_t Cy_SysClk_PiloTrim(uint32_t piloFreq)
         Cy_SysClk_PiloSetTrim(trim);
     }
 
-    return (sign ? (int32_t)diff : (0L - (int32_t)diff));
+    return ((int32_t)(sign ? (int32_t)diff : (0L - (int32_t)diff)));
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 /** \} group_sysclk_trim_funcs */
 

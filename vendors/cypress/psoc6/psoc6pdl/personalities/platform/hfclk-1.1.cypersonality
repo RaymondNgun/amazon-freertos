@@ -138,6 +138,7 @@
   <ConfigFirmware>
     <ConfigInclude value="cy_sysclk.h" include="true" />
     <ConfigDefine name="CY_CFG_SYSCLK_CLKHF`${clockInst}`_ENABLED" public="false" value="1" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_CLKHF`${clockInst}`_DIVIDER" public="false" value="CY_SYSCLK_CLKHF_`${divider == 1 ? &quot;NO_DIVIDE&quot; : ((&quot;DIVIDE_BY_&quot;) . divider)}`" include="true" />
     <ConfigDefine name="CY_CFG_SYSCLK_CLKHF`${clockInst}`" public="true" value="`${clockInst}`UL" include="true" />
     <ConfigDefine name="CY_CFG_SYSCLK_CLKHF`${clockInst}`_FREQ_MHZ" public="false" value="`${frequency / 1000000}`UL" include="true" />
     <ConfigDefine name="CY_CFG_SYSCLK_CLKHF`${clockInst}`_CLKPATH" public="false" value="CY_SYSCLK_CLKHF_IN_CLKPATH`${sourceClockNumber}`" include="true" />

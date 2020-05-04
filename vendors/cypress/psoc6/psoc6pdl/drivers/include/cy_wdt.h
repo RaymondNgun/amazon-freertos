@@ -1,6 +1,6 @@
 /***************************************************************************//**
 * \file cy_wdt.h
-* \version 1.20
+* \version 1.30
 *
 *  This file provides constants and parameter values for the WDT driver.
 *
@@ -191,6 +191,12 @@
 * <table class="doxtable">
 *   <tr><th>Version</th><th>Changes</th><th>Reason for Change</th></tr>
 *   <tr>
+*     <td>1.30</td>
+*     <td>Updated the following functions for the PSoC64 devices: \ref Cy_WDT_ClearInterrupt(), 
+*         \ref Cy_WDT_MaskInterrupt(), and \ref Cy_WDT_UnmaskInterrupt().</td>
+*     <td>Added PSoC64 device support.</td>
+*   </tr>
+*   <tr>
 *     <td>1.20</td>
 *     <td>Added a new API function \ref Cy_WDT_IsEnabled() </td>
 *     <td>Enhancement based on usability feedback.</td>
@@ -257,6 +263,10 @@
 #include "cy_device_headers.h"
 #include "cy_device.h"
 #include "cy_syslib.h"
+#if defined(CY_DEVICE_SECURE)
+    #include "cy_pra.h"
+#endif /* defined(CY_DEVICE_SECURE) */
+
 
 #if defined(__cplusplus)
 extern "C" {
@@ -276,7 +286,7 @@ extern "C" {
 #define CY_WDT_DRV_VERSION_MAJOR                       1
 
 /** The driver minor version */
-#define CY_WDT_DRV_VERSION_MINOR                       20
+#define CY_WDT_DRV_VERSION_MINOR                       30
 
 /** The internal define for the first iteration of WDT unlocking */
 #define CY_SRSS_WDT_LOCK_BIT0                           ((uint32_t)0x01U << 30U)
@@ -443,7 +453,11 @@ __STATIC_INLINE uint32_t Cy_WDT_GetIgnoreBits(void)
 *******************************************************************************/
 __STATIC_INLINE void Cy_WDT_MaskInterrupt(void)
 {
-    SRSS_SRSS_INTR_MASK &= (uint32_t)(~ _VAL2FLD(SRSS_SRSS_INTR_MASK_WDT_MATCH, 1U));
+    #if CY_CPU_CORTEX_M4 && defined(CY_DEVICE_SECURE)
+        CY_PRA_REG32_CLR_SET(CY_PRA_INDX_SRSS_SRSS_INTR_MASK, SRSS_SRSS_INTR_MASK_WDT_MATCH, 0U);
+    #else
+        SRSS_SRSS_INTR_MASK &= (uint32_t)(~ _VAL2FLD(SRSS_SRSS_INTR_MASK_WDT_MATCH, 1U));
+    #endif /* CY_CPU_CORTEX_M4 && defined(CY_DEVICE_SECURE) */
 }
 
 
@@ -457,7 +471,11 @@ __STATIC_INLINE void Cy_WDT_MaskInterrupt(void)
 *******************************************************************************/
 __STATIC_INLINE void Cy_WDT_UnmaskInterrupt(void)
 {
-    SRSS_SRSS_INTR_MASK |= _VAL2FLD(SRSS_SRSS_INTR_MASK_WDT_MATCH, 1U);
+    #if CY_CPU_CORTEX_M4 && defined(CY_DEVICE_SECURE)
+        CY_PRA_REG32_CLR_SET(CY_PRA_INDX_SRSS_SRSS_INTR_MASK, SRSS_SRSS_INTR_MASK_WDT_MATCH, 1U);
+    #else
+        SRSS_SRSS_INTR_MASK |= _VAL2FLD(SRSS_SRSS_INTR_MASK_WDT_MATCH, 1U);
+    #endif /* CY_CPU_CORTEX_M4 && defined(CY_DEVICE_SECURE) */
 }
 /** \} group_wdt_functions */
 

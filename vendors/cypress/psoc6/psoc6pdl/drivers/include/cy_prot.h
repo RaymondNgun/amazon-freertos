@@ -384,6 +384,12 @@
 *     <td>This piece of code is written for DW_V2_Type only and it will be never
 *         executed for DW_V1_Type (which is a default build option for DW_Type).</td>
 *   </tr>
+*   <tr>
+*     <td>19.13</td>
+*     <td>A</td>
+*     <td>The # and ## operators should not be used.</td>
+*     <td>The ## preprocessor operator is used in macros to form the field mask.</td>
+*   </tr>
 * </table>
 *
 * \section group_prot_changelog Changelog

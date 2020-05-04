@@ -1,6 +1,6 @@
 /***************************************************************************//**
 * \file cy_systick.c
-* \version 1.10
+* \version 1.10.1
 *
 * Provides the API definitions of the SisTick driver.
 *
@@ -22,9 +22,9 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "cy_systick.h"
 #include <stddef.h>     /* for NULL */
-
+#include "cy_systick.h"
+#include "cy_sysint.h"
 
 static Cy_SysTick_Callback Cy_SysTick_Callbacks[CY_SYS_SYST_NUM_OF_CALLBACKS];
 static void Cy_SysTick_ServiceCallbacks(void);

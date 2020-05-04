@@ -26,6 +26,9 @@
 #include "cy_ipc_sema.h"
 #include "cy_ipc_pipe.h"
 #include "cy_prot.h"
+#if defined(CY_DEVICE_SECURE)
+    #include "cy_pra.h"
+#endif /* defined(CY_DEVICE_SECURE) */
 
 
 /*******************************************************************************
@@ -33,11 +36,13 @@
 *******************************************************************************/
 static void EnterDeepSleepRam(cy_en_syspm_waitfor_t waitFor);
 
+#if !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
 static void SetReadMarginTrimUlp(void);
 static void SetReadMarginTrimLp(void);
 static void SetWriteAssistTrimUlp(void);
 static void SetWriteAssistTrimLp(void);
 static bool IsVoltageChangePossible(void);
+#endif /* !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
 
 /*******************************************************************************
@@ -177,6 +182,11 @@ static bool IsVoltageChangePossible(void);
 
 /* The pointer to the Cy_EnterDeepSleep() function in the ROM */
 #define ROM_ENTER_DEEP_SLEEP_ADDR         (*(uint32_t *) 0x00000D30UL)
+
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    #define PM_HIBERNATE_ENTER_HIBERNATE    (0UL)
+    #define PM_HIBERNATE_IO_UNFREEZE        (1UL)
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
 /* The define to call the ROM Cy_EnterDeepSleep() function. 
 * The ROM Cy_EnterDeepSleep() function prepares the system for the Deep Sleep 
@@ -667,17 +677,17 @@ cy_en_syspm_status_t Cy_SysPm_CpuEnterSleep(cy_en_syspm_waitfor_t waitFor)
 cy_en_syspm_status_t Cy_SysPm_CpuEnterDeepSleep(cy_en_syspm_waitfor_t waitFor)
 {
     /* Structure for registers that should retain while Deep Sleep mode */
+#if ((CY_CPU_CORTEX_M0P) || (!defined(CY_DEVICE_SECURE)))
     static cy_stc_syspm_backup_regs_t bkpRegs;
-
+    uint8_t deviceRev = Cy_SysLib_GetDeviceRevision();
+#endif /* ((CY_CPU_CORTEX_M0P) || (!defined(CY_DEVICE_SECURE))) */
     uint32_t interruptState;
     uint32_t cbDeepSleepRootIdx = (uint32_t) CY_SYSPM_DEEPSLEEP;
     uint32_t ddftStructData = 0UL;
-    uint8_t deviceRev;
     cy_en_syspm_status_t retVal = CY_SYSPM_SUCCESS;
 
     CY_ASSERT_L3(CY_SYSPM_IS_WAIT_FOR_VALID(waitFor));
 
-    deviceRev = Cy_SysLib_GetDeviceRevision();
     /* Call the registered callback functions with the CY_SYSPM_CHECK_READY 
     *  parameter
     */
@@ -703,6 +713,7 @@ cy_en_syspm_status_t Cy_SysPm_CpuEnterDeepSleep(cy_en_syspm_waitfor_t waitFor)
 
         /* Preparation for the System Deep Sleep mode */
         
+#if ((CY_CPU_CORTEX_M0P) || (!defined(CY_DEVICE_SECURE)))
         /* Acquire the IPC to prevent changing of the shared resources at the same time */
         while (0U == _FLD2VAL(IPC_STRUCT_ACQUIRE_SUCCESS, REG_IPC_STRUCT_ACQUIRE(CY_IPC_STRUCT_PTR(CY_IPC_CHAN_DDFT))))
         {
@@ -751,6 +762,13 @@ cy_en_syspm_status_t Cy_SysPm_CpuEnterDeepSleep(cy_en_syspm_waitfor_t waitFor)
         
         /* Read the release value to make sure it is set */
         (void) REG_IPC_STRUCT_RELEASE(CY_IPC_STRUCT_PTR(CY_IPC_CHAN_DDFT));
+        
+#endif /* ((CY_CPU_CORTEX_M0P) || (!defined(CY_DEVICE_SECURE))) */
+
+    #if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+        /* Trigger PRA access to CM0 core to allow CM0 to store configuration */
+        CY_PRA_FUNCTION_CALL_VOID_VOID(CY_PRA_MSG_TYPE_SECURE_ONLY, CY_PRA_INDX_PM_CM4_DP_FLAG_SET);
+    #endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
         /* Different device families and revisions have a different Deep Sleep entries */
         if (Cy_SysLib_GetDevice() == CY_SYSLIB_DEVICE_PSOC6ABLE2)
@@ -793,6 +811,9 @@ cy_en_syspm_status_t Cy_SysPm_CpuEnterDeepSleep(cy_en_syspm_waitfor_t waitFor)
 
             #if (CY_CPU_CORTEX_M4)
                 } while (_FLD2VAL(CPUSS_CM4_PWR_CTL_PWR_MODE, CPUSS_CM4_PWR_CTL) == CM4_PWR_STS_RETAINED);
+        #if defined(CY_DEVICE_SECURE)
+                CY_PRA_CM0_WAKEUP(CY_PRA_INDX_CPUSS_CM4_PWR_CTL);
+        #endif /* (CY_DEVICE_SECURE) */
             #endif /* (CY_CPU_CORTEX_M4) */
             }
         }
@@ -805,6 +826,8 @@ cy_en_syspm_status_t Cy_SysPm_CpuEnterDeepSleep(cy_en_syspm_waitfor_t waitFor)
 
         ddftStructData = REG_IPC_STRUCT_DATA(CY_IPC_STRUCT_PTR(CY_IPC_CHAN_DDFT));
 
+    /* Removed for the security devices as this part is done by CM0 only */
+    #if !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
         if (0U != (ddftStructData & OTHER_CORE_DP_MASK))
         {
             cy_stc_syspm_backup_regs_t *ptrRegs;
@@ -814,6 +837,8 @@ cy_en_syspm_status_t Cy_SysPm_CpuEnterDeepSleep(cy_en_syspm_waitfor_t waitFor)
             /* Restore saved registers */
             Cy_SysPm_RestoreRegisters(ptrRegs);
         }
+    #endif /* !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
+        
         ddftStructData &= ~CUR_CORE_DP_MASK;
 
         /* Update pointer to the latest saved structure */
@@ -958,6 +983,11 @@ cy_en_syspm_status_t Cy_SysPm_SystemEnterHibernate(void)
             (void) Cy_SysPm_ExecuteCallback(CY_SYSPM_HIBERNATE, CY_SYSPM_BEFORE_TRANSITION);
         }
 
+    #if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+        CY_PRA_FUNCTION_CALL_VOID_PARAM(CY_PRA_MSG_TYPE_SECURE_ONLY, 
+                                        CY_PRA_INDX_PM_HIBERNATE, 
+                                        PM_HIBERNATE_ENTER_HIBERNATE);
+    #else
         /* Preserve the token that will be retained through a wakeup sequence.
          * This could be used by Cy_SysLib_GetResetReason() to differentiate
          * Wakeup from a general reset event.
@@ -973,6 +1003,7 @@ cy_en_syspm_status_t Cy_SysPm_SystemEnterHibernate(void)
 
         /* Third write cause system to enter Hibernate */
         SRSS_PWR_HIBERNATE |= SET_HIBERNATE_MODE;
+    #endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
         /* Read register to make sure it is settled */
         (void) SRSS_PWR_HIBERNATE;
@@ -1330,6 +1361,7 @@ cy_en_syspm_status_t Cy_SysPm_SystemSetMinRegulatorCurrent(void)
 {
     cy_en_syspm_status_t retVal = CY_SYSPM_CANCELED;
 
+#if !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
     /* Check are the power circuits are ready to enter into regulator minimum 
     *  current mode
     */
@@ -1356,6 +1388,7 @@ cy_en_syspm_status_t Cy_SysPm_SystemSetMinRegulatorCurrent(void)
         
         retVal = CY_SYSPM_SUCCESS;
     }
+#endif /* !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
     
     return retVal;
 }
@@ -1391,8 +1424,11 @@ cy_en_syspm_status_t Cy_SysPm_SystemSetMinRegulatorCurrent(void)
 *******************************************************************************/
 cy_en_syspm_status_t Cy_SysPm_SystemSetNormalRegulatorCurrent(void)
 {
-    uint32_t timeOut = WAIT_DELAY_TRYES;
     cy_en_syspm_status_t retVal = CY_SYSPM_TIMEOUT;
+
+#if !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+
+    uint32_t timeOut = WAIT_DELAY_TRYES;
 
     /* Configure the regulator normal current mode for the POR/BOD circuits 
     *  and for the Bandgap Voltage and Current References
@@ -1424,6 +1460,7 @@ cy_en_syspm_status_t Cy_SysPm_SystemSetNormalRegulatorCurrent(void)
         
         retVal= CY_SYSPM_SUCCESS;
     }
+#endif /* !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
     return retVal;
 }
@@ -1564,7 +1601,11 @@ void Cy_SysPm_SetHibernateWakeupSource(uint32_t wakeupSource)
         }
     }
 
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    CY_PRA_REG32_SET(CY_PRA_INDX_SRSS_PWR_HIBERNATE, (SRSS_PWR_HIBERNATE & (uint32_t) ~polarityMask) | wakeupSource);
+#else
     SRSS_PWR_HIBERNATE = (SRSS_PWR_HIBERNATE & (uint32_t) ~polarityMask) | wakeupSource;
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
     /* Read register to make sure it is settled */
     (void) SRSS_PWR_HIBERNATE;
@@ -1618,7 +1659,11 @@ void Cy_SysPm_ClearHibernateWakeupSource(uint32_t wakeupSource)
         }
     }
 
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    CY_PRA_REG32_SET(CY_PRA_INDX_SRSS_PWR_HIBERNATE, (SRSS_PWR_HIBERNATE & (uint32_t) ~clearWakeupSourceMask));
+#else
     SRSS_PWR_HIBERNATE &= (uint32_t) ~clearWakeupSourceMask;
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
     /* Read register to make sure it is settled */
     (void) SRSS_PWR_HIBERNATE;
@@ -1714,6 +1759,12 @@ cy_en_syspm_status_t Cy_SysPm_BuckEnable(cy_en_syspm_buck_voltage1_t voltage)
 
     cy_en_syspm_status_t retVal = CY_SYSPM_INVALID_STATE;
 
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    retVal = (cy_en_syspm_status_t)CY_PRA_FUNCTION_CALL_RETURN_PARAM(CY_PRA_MSG_TYPE_FUNC_POLICY,
+                                                                     CY_PRA_INDX_PM_BUCK_ENABLE,
+                                                                     voltage);
+#else    
+
     /* Enable the Buck regulator only if it was not enabled previously.
     *  If the LDO is disabled, the device is sourced by the Buck regulator
     */
@@ -1804,6 +1855,7 @@ cy_en_syspm_status_t Cy_SysPm_BuckEnable(cy_en_syspm_buck_voltage1_t voltage)
             retVal = CY_SYSPM_SUCCESS;
         }
     }
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
     return retVal;
 }
@@ -1876,6 +1928,12 @@ cy_en_syspm_status_t Cy_SysPm_BuckSetVoltage1(cy_en_syspm_buck_voltage1_t voltag
 
     cy_en_syspm_status_t retVal = CY_SYSPM_INVALID_STATE;
 
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    retVal = (cy_en_syspm_status_t)CY_PRA_FUNCTION_CALL_RETURN_PARAM(CY_PRA_MSG_TYPE_FUNC_POLICY,
+                                                                     CY_PRA_INDX_PM_BUCK_ENABLE,
+                                                                     voltage);
+#else    
+    
     /* Change the voltage only if protection context is set to zero (PC = 0) 
     *  or the device revision supports modifying registers via syscall
     */
@@ -1945,6 +2003,8 @@ cy_en_syspm_status_t Cy_SysPm_BuckSetVoltage1(cy_en_syspm_buck_voltage1_t voltag
 
         Cy_SysLib_ExitCriticalSection(interruptState);
     }
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
+    
     return retVal;
 }
 
@@ -1991,6 +2051,7 @@ bool Cy_SysPm_BuckIsOutputEnabled(cy_en_syspm_buck_out_t output)
 }
 
 
+#if !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
 /*******************************************************************************
 * Function Name: Cy_SysPm_BuckEnableVoltage2
 ****************************************************************************//**
@@ -2036,6 +2097,7 @@ void Cy_SysPm_BuckEnableVoltage2(void)
         Cy_SysLib_DelayUs(BUCK_OUT2_INIT_DELAY_US);
     }
 }
+#endif /* !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
 
 /*******************************************************************************
@@ -2069,6 +2131,7 @@ void Cy_SysPm_BuckEnableVoltage2(void)
 *******************************************************************************/
 void Cy_SysPm_BuckSetVoltage2(cy_en_syspm_buck_voltage2_t voltage, bool waitToSettle)
 {
+#if !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
     /* Do nothing if device does not have the second Buck output (SIMO) */
     if (0U != cy_device->sysPmSimoPresent)
     {
@@ -2093,6 +2156,10 @@ void Cy_SysPm_BuckSetVoltage2(cy_en_syspm_buck_voltage2_t voltage, bool waitToSe
             }
         }
     }
+#else
+    (void)voltage;
+    (void)waitToSettle;
+#endif /* !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 }
 
 
@@ -2162,6 +2229,11 @@ cy_en_syspm_status_t Cy_SysPm_LdoSetVoltage(cy_en_syspm_ldo_voltage_t voltage)
 
     cy_en_syspm_status_t retVal = CY_SYSPM_INVALID_STATE;
 
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    retVal = (cy_en_syspm_status_t)CY_PRA_FUNCTION_CALL_RETURN_PARAM(CY_PRA_MSG_TYPE_FUNC_POLICY,
+                                                                     CY_PRA_INDX_PM_LDO_SET_VOLTAGE,
+                                                                     voltage);
+#else
     /* Change the voltage only if protection context is set to zero (PC = 0), 
     *  or the device revision supports modifying registers via syscall
     */
@@ -2243,6 +2315,8 @@ cy_en_syspm_status_t Cy_SysPm_LdoSetVoltage(cy_en_syspm_ldo_voltage_t voltage)
 
         Cy_SysLib_ExitCriticalSection(interruptState);
     }
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
+    
     return retVal;
 }
 
@@ -2277,6 +2351,11 @@ cy_en_syspm_status_t Cy_SysPm_LdoSetMode(cy_en_syspm_ldo_mode_t mode)
     
     cy_en_syspm_status_t retVal = CY_SYSPM_CANCELED;
     
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    retVal = (cy_en_syspm_status_t)CY_PRA_FUNCTION_CALL_RETURN_PARAM(CY_PRA_MSG_TYPE_FUNC_POLICY,
+                                                                     CY_PRA_INDX_PM_LDO_SET_MODE,
+                                                                     mode);
+#else
     switch (mode)
     {
         case CY_SYSPM_LDO_MODE_NORMAL:
@@ -2307,6 +2386,7 @@ cy_en_syspm_status_t Cy_SysPm_LdoSetMode(cy_en_syspm_ldo_mode_t mode)
             retVal = CY_SYSPM_FAIL;
         break;
     }
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
     return retVal;
 }
@@ -2732,6 +2812,9 @@ void Cy_SysPm_IoUnfreeze(void)
     uint32_t interruptState;
     interruptState = Cy_SysLib_EnterCriticalSection();
 
+#if ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
+    CY_PRA_FUNCTION_CALL_VOID_PARAM(CY_PRA_MSG_TYPE_SECURE_ONLY, CY_PRA_INDX_PM_HIBERNATE, PM_HIBERNATE_IO_UNFREEZE);
+#else
     /* Preserve the last reset reason and wakeup polarity. Then, unfreeze I/O:
      * write PWR_HIBERNATE.FREEZE=0, .UNLOCK=0x3A, .HIBERANTE=0
      */
@@ -2741,6 +2824,7 @@ void Cy_SysPm_IoUnfreeze(void)
     * write PWR_HIBERNATE.HIBERNATE=0, UNLOCK=0x00, HIBERANTE=0
     */
     SRSS_PWR_HIBERNATE &= HIBERNATE_RETAIN_STATUS_MASK;
+#endif /* ((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
     
     /* Read register to make sure it is settled */
     (void) SRSS_PWR_HIBERNATE;
@@ -2777,6 +2861,8 @@ cy_en_syspm_status_t Cy_SysPm_WriteVoltageBitForFlash(cy_en_syspm_flash_voltage_
     CY_ASSERT_L3(CY_SYSPM_IS_BIT_FOR_FLASH_VALID(value));
     
     cy_en_syspm_status_t retVal = CY_SYSPM_CANCELED;
+
+#if !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
     uint16_t curDeviceRevision = Cy_SysLib_GetDeviceRevision();
     uint16_t curDevice = Cy_SysLib_GetDevice();
 
@@ -2830,11 +2916,15 @@ cy_en_syspm_status_t Cy_SysPm_WriteVoltageBitForFlash(cy_en_syspm_flash_voltage_
             }
         }
     }
-
+#else
+    (void)value;
+#endif /* !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
+    
     return retVal;
 }
 
 
+#if !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
 /*******************************************************************************
 * Function Name: Cy_SysPm_SaveRegisters
 ****************************************************************************//**
@@ -2916,6 +3006,7 @@ void Cy_SysPm_RestoreRegisters(cy_stc_syspm_backup_regs_t const *regs)
         UDB_UDBIF_BANK_CTL = regs->CY_SYSPM_UDB_UDBIF_BANK_CTL_REG;
     }
 }
+#endif /* !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
 
 /*******************************************************************************
@@ -3024,6 +3115,7 @@ static void EnterDeepSleepRam(cy_en_syspm_waitfor_t waitFor)
 #endif
 
 
+#if !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE)))
 /*******************************************************************************
 * Function Name: SetReadMarginTrimUlp
 ****************************************************************************//**
@@ -3167,6 +3259,7 @@ static bool IsVoltageChangePossible(void)
 
     return retVal;
 }
+#endif /* !((CY_CPU_CORTEX_M4) && (defined(CY_DEVICE_SECURE))) */
 
 
 /* [] END OF FILE */

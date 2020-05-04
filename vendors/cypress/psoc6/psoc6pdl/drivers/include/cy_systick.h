@@ -1,6 +1,6 @@
 /***************************************************************************//**
 * \file cy_systick.h
-* \version 1.10
+* \version 1.10.1
 *
 * Provides the API declarations of the SysTick driver.
 *
@@ -81,6 +81,11 @@
 * <table class="doxtable">
 * <tr><th>Version</th><th>Changes</th><th>Reason for Change</th></tr>
 * <tr>
+*   <td>1.10.1</td>
+*     <td>Updated include files.</td>
+*     <td>Improve pdl usability.</td>
+* </tr>
+* <tr>
 *   <td rowspan="2">1.10</td>
 *     <td>Flattened the organization of the driver source code into the single 
 *         source directory and the single include directory.
@@ -120,7 +125,6 @@ extern "C" {
 #endif
 
 /** \cond */
-extern cy_israddress __ramVectors[];
 typedef void (*Cy_SysTick_Callback)(void);
 /** \endcond */
 

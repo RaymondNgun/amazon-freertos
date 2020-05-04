@@ -953,12 +953,14 @@ void Cy_PDL_Init(const cy_stc_device_t * device);
 #define CY_IPC_CHAN_CYPIPE_EP0              (5UL) /* IPC data channel for CYPIPE EP0 */
 #define CY_IPC_CHAN_CYPIPE_EP1              (6UL) /* IPC data channel for CYPIPE EP1 */
 #define CY_IPC_CHAN_DDFT                    (7UL) /* IPC data channel for DDFT */
+#define CY_IPC_CHAN_PRA                     (10UL)/* IPC data channel for PRA */
 
 /* IPC Notify interrupts definitions */
 #define CY_IPC_INTR_SYSCALL1                (0UL)
 #define CY_IPC_INTR_CYPIPE_EP0              (3UL)
 #define CY_IPC_INTR_CYPIPE_EP1              (4UL)
 #define CY_IPC_INTR_SPARE                   (7UL)
+#define CY_IPC_INTR_PRA                     (10UL)
 
 /* Endpoint indexes in the pipe array */
 #define CY_IPC_EP_CYPIPE_CM0_ADDR           (0UL)

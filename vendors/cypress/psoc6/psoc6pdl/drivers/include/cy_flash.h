@@ -1,6 +1,6 @@
 /***************************************************************************//**
 * \file cy_flash.h
-* \version 3.30.4
+* \version 3.40
 *
 * Provides the API declarations of the Flash driver.
 *
@@ -256,6 +256,11 @@
 * <table class="doxtable">
 *   <tr><th>Version</th><th style="width: 52%;">Changes</th><th>Reason for Change</th></tr>
 *   <tr>
+*     <td rowspan="1">3.40</td>
+*     <td>Updated API to access protected registers.</td>
+*     <td>Added PSoC64 device support.</td>
+*   </tr>
+*   <tr>
 *     <td rowspan="1">3.30.4</td>
 *     <td>Improved documentation.</td>
 *     <td>User experience enhancement.</td>
@@ -280,13 +285,13 @@
 *     <td>Moved ipcWaitMessageStc structure to the RAM section called ".cy_sharedmem".</td>
 *     <td>Support Secure Boot devices.</td>
 *   </tr>
-*	<tr>
+*   <tr>
 *     <td>Renamed Function Cy_Flash_StartErase() to Cy_Flash_StartEraseRow().</td>
 *     <td>The driver improvements based on the usability feedback.</td>
-*	</tr>
+*   </tr>
 *   <tr>
 *     <td>Added new API functions \ref Cy_Flash_EraseSector, 
-*   	  \ref Cy_Flash_StartEraseSector, \ref Cy_Flash_EraseSubsector, 
+*         \ref Cy_Flash_StartEraseSector, \ref Cy_Flash_EraseSubsector, 
 *         \ref Cy_Flash_StartEraseSubsector </td>
 *     <td>The driver improvements based on the usability feedback.</td>
 *   </tr>
@@ -395,7 +400,7 @@ extern "C" {
 #define CY_FLASH_DRV_VERSION_MAJOR       3
 
 /** Driver minor version */
-#define CY_FLASH_DRV_VERSION_MINOR       30
+#define CY_FLASH_DRV_VERSION_MINOR       40
 
 #define CY_FLASH_ID               (CY_PDL_DRV_ID(0x14UL))                          /**< FLASH PDL ID */
 
@@ -477,6 +482,9 @@ cy_en_flashdrv_status_t Cy_Flash_IsOperationComplete(void);
 cy_en_flashdrv_status_t Cy_Flash_RowChecksum(uint32_t rowAddr, uint32_t* checksumPtr);
 cy_en_flashdrv_status_t Cy_Flash_CalculateHash(const uint32_t* data, uint32_t numberOfBytes, uint32_t* hashPtr);
 uint32_t Cy_Flash_GetExternalStatus(void);
+#if defined(CY_DEVICE_SECURE)
+    void Cy_Flash_RAMDelay(uint32_t microseconds);
+#endif /* defined(CY_DEVICE_SECURE) */
 
 #if !defined(CY_FLASH_RWW_DRV_SUPPORT_DISABLED)
     void Cy_Flash_InitExt(cy_stc_flash_notify_t *ipcWaitMessageAddr);

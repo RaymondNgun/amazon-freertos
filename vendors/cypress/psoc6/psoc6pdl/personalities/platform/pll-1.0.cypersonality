@@ -104,6 +104,12 @@
   <ConfigFirmware>
     <ConfigInclude value="cy_sysclk.h" include="true" />
     <ConfigDefine name="CY_CFG_SYSCLK_PLL`${clockInst}`_ENABLED" value="1" public="false" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_PLL`${clockInst}`_FEEDBACK_DIV" value="`${feedback}`" public="false" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_PLL`${clockInst}`_REFERENCE_DIV" value="`${reference}`" public="false" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_PLL`${clockInst}`_OUTPUT_DIV" value="`${output}`" public="false" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_PLL`${clockInst}`_LF_MODE" value="`${lowFrequencyMode}`" public="false" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_PLL`${clockInst}`_OUTPUT_MODE" value="CY_SYSCLK_FLLPLL_OUTPUT_AUTO" public="false" include="true" />
+    <ConfigDefine name="CY_CFG_SYSCLK_PLL`${clockInst}`_OUTPUT_FREQ" value="`${frequency}`" public="false" include="true" />
     <ConfigStruct name="`${INST_NAME . &quot;_pllConfig&quot;}`" type="cy_stc_pll_manual_config_t" const="true" public="false" include="true" >
       <Member name="feedbackDiv" value="`${feedback}`" />
       <Member name="referenceDiv" value="`${reference}`" />
